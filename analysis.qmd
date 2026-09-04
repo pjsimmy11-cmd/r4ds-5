@@ -44,8 +44,73 @@ fires <- jsonlite::read_json("data/wildfires.geojson") |>
   )
 ```
 
+```{r}
+fires |>
+  group_by(state) |>
+  summarize(total_acres = sum(gis_acres, na.rm = TRUE), .groups = "drop") |>
+  slice_max(total_acres, n = 10) |>
+  mutate(state = fct_reorder(state, total_acres)) |>
+  ggplot(aes(x = total_acres, y = state)) +
+  geom_col() +
+  labs(
+    title = "Total Acres Burned by State, 1990–2023",
+    x = "Total acres burned",
+    y = NULL,
+    caption = "Source: NIFC InterAgencyFirePerimeterHistory"
+  )
+```
 
+```{r}
+centroid_lon <- function(coords) {
+  mean(map_dbl(coords[[1]], 1))
+}
+centroid_lat <- function(coords) {
+  mean(map_dbl(coords[[1]], 2))
+}
 
+big_fires <- fires |>
+  filter(gis_acres >= 100000) |>
+  mutate(
+    lon = map_dbl(geometry_coordinates, centroid_lon),
+    lat = map_dbl(geometry_coordinates, centroid_lat)
+  )
+```
 
+```{r}
+big_fires |>
+  count(agency) |>
+  mutate(agency = fct_reorder(agency, n)) |>
+  ggplot(aes(x = n, y = agency)) +
+  geom_col() +
+  labs(
+    title = "Large Wildfires by Managing Agency",
+    subtitle = "Fires ≥ 100,000 acres, 1990–2023",
+    x = "Number of fires",
+    y = NULL,
+    caption = "Source: NIFC InterAgencyFirePerimeterHistory"
+  )
+```
 
+```{r}
+top_ten <- big_fires |> slice_max(gis_acres, n = 10)
 
+leaflet() |>
+  addTiles() |>
+  setView(lng = -117, lat = 40, zoom = 5) |>
+  addPolygons(
+    data = top_ten |>
+      transmute(pts = purrr::map(geometry_coordinates,
+                                 \(g) tibble(lng = map_dbl(g[[1]], 1),
+                                             lat = map_dbl(g[[1]], 2)) |>
+                                   add_row(lng = NA, lat = NA))) |>
+      unnest(pts),
+    lng = ~lng,
+    lat = ~lat,
+    weight      = 1,
+    color       = "#cc4400",
+    fillColor   = "#ff7733",
+    fillOpacity = 0.5,
+    popup = paste0(top_ten$incident, " (", top_ten$fire_year, "), ",
+                   format(round(top_ten$gis_acres), big.mark = ","), " acres")
+  )
+```
