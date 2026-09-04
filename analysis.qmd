@@ -114,3 +114,84 @@ leaflet() |>
                    format(round(top_ten$gis_acres), big.mark = ","), " acres")
   )
 ```
+
+```{r}
+imdb_snapshots <- read_rds("data/imdb_snapshots.rds")
+imdb_snapshots
+
+imdb_snapshots |>
+  count(snap_year)
+```
+
+```{r}
+imdb_snapshots |>
+  count(title, name = "n_snapshots") |>
+  count(n_snapshots, name = "n_films")
+```
+
+```{r}
+#| cache: true
+snap_urls <- c(
+  "https://web.archive.org/web/20150101/https://www.imdb.com/chart/top/",
+  "https://web.archive.org/web/20170101/https://www.imdb.com/chart/top/",
+  "https://web.archive.org/web/20190101/https://www.imdb.com/chart/top/",
+  "https://web.archive.org/web/20210101/https://www.imdb.com/chart/top/",
+  "https://web.archive.org/web/20220201012049/https://www.imdb.com/chart/top/"
+)
+snap_years <- c(2015, 2017, 2019, 2021, 2022)
+
+scrape_snapshot <- function(url, snap_year) {
+  page      <- request(url) |>
+    req_timeout(60) |>
+    req_retry(max_tries = 3, backoff = ~ 5) |>
+    req_perform() |>
+    resp_body_html()
+  tbl       <- page |> html_element("table") |> html_table()
+  attr_vals <- page |> html_elements("td strong") |> html_attr("title")
+  tbl |>
+    select(rank_title_year = `Rank & Title`, rating = `IMDb Rating`) |>
+    mutate(
+      rank_title_year = str_replace_all(rank_title_year, "\n +", " "),
+      number = str_extract(attr_vals, "(?<=based on )[0-9,]+") |>
+        parse_number()
+    ) |>
+    separate_wider_regex(
+      rank_title_year,
+      patterns = c(rank = "\\d+", "\\. ", title = ".+", " +\\(", year = "\\d+", "\\)")
+    ) |>
+    mutate(rank = as.integer(rank), year = as.integer(year), snap_year = snap_year) |>
+    select(snap_year, rank, title, year, rating, number)
+}
+
+imdb_snapshots <- map2(snap_urls, snap_years, scrape_snapshot) |>
+  list_rbind()
+```
+
+```{r}
+imdb_snapshots |>
+  filter(snap_year %in% c(2015, 2022)) |>
+  select(snap_year, title, year, rank) |>
+  pivot_wider(names_from = snap_year, values_from = rank, names_prefix = "rank_") |>
+  drop_na() |>
+  mutate(
+    rank_change = rank_2015 - rank_2022,
+    decade = paste0(floor(year / 10) * 10, "s")
+  ) |>
+  group_by(decade) |>
+  summarise(avg_change = mean(rank_change), .groups = "drop") |>
+  mutate(direction = if_else(avg_change > 0, "Rose", "Fell")) |>
+  ggplot(aes(x = avg_change, y = decade, fill = direction)) +
+  geom_col() +
+  geom_vline(xintercept = 0, linewidth = 0.8) +
+  scale_fill_manual(values = c("Rose" = "#2a9d8f", "Fell" = "#e76f51")) +
+  labs(
+    title = "Classic Films Slide, 1990s Films Hold Steady",
+    subtitle = "Average rank change in the IMDb Top 250, 2015 to 2022",
+    x = "Average rank change (positive = rose)",
+    y = "Film release decade",
+    fill = NULL,
+    caption = "Films appearing in both 2015 and 2022 snapshots. n = 190 films."
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
