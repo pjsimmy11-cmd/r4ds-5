@@ -2,5 +2,50 @@
 title: "Wildfires and Movies"
 author: "Peter Simmons"
 format: html
+execute:
+  echo: false
 ---
+
+```{r}
+#| message: false
+library(tidyverse)
+library(purrr)
+library(leaflet)
+library(rvest)
+library(httr2)
+library(jsonlite)
+```
+
+```{r}
+raw <- jsonlite::read_json("data/wildfires.geojson")
+length(raw$features)
+```
+
+```{r}
+pluck(raw, "features", 1) |> names()
+```
+
+```{r}
+pluck(raw, "features", 1, "geometry", "coordinates", 1, 1)
+```
+
+```{r}
+#| cache: true
+fires <- jsonlite::read_json("data/wildfires.geojson") |>
+  pluck("features") |>
+  tibble(features = _) |>
+  unnest_wider(features) |>
+  unnest_wider(properties) |>
+  unnest_wider(geometry, names_sep = "_") |>
+  select(incident, gis_acres, fire_year, agency, state, geometry_coordinates) |>
+  mutate(
+    gis_acres = as.numeric(gis_acres),
+    fire_year = as.integer(fire_year)
+  )
+```
+
+
+
+
+
 
